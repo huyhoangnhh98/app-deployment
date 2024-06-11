@@ -1,0 +1,59 @@
+name: Deploy to Kubernetes
+
+on:
+  repository_dispatch:
+    types: [deploy]
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v1
+      with:
+        version: 'latest'
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v1
+      with:
+        version: 'latest'
+
+    - name: Deploy to Development
+      if: github.event.client_payload.environment == 'refs/heads/develop'
+      env:
+        KUBECONFIG: ${{ secrets.KUBE_CONFIG_DEV }}
+      run: |
+        helm upgrade --install example-node-app ./app-deployment --namespace dev --set image.repository=${{ github.event.client_payload.image }} --set image.tag=${{ github.event.client_payload.image_tag }}
+
+    - name: Deploy to Staging
+      if: github.event.client_payload.environment == 'refs/heads/staging'
+      env:
+        KUBECONFIG: ${{ secrets.KUBE_CONFIG_STG }}
+      run: |
+        helm upgrade --install example-node-app ./app-deployment --namespace staging --set image.repository=${{ github.event.client_payload.image }} --set image.tag=${{ github.event.client_payload.image_tag }}
+
+    - name: Deploy to Production
+      if: github.event.client_payload.environment == 'refs/heads/prod'
+      env:
+        KUBECONFIG: ${{ secrets.KUBE_CONFIG_PROD }}
+      run: |
+        helm upgrade --install example-node-app ./app-deployment --namespace prod --set image.repository=${{ github.event.client_payload.image }} --set image.tag=${{ github.event.client_payload.image_tag }}
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Send notification to Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
